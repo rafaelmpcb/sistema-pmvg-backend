@@ -42,20 +42,34 @@ async function syncCMED() {
 
     console.log(`📊 Total de linhas: ${jsonData.length}`);
 
-    // ✅ NOVO: Encontrar linha dos headers reais (procurar por "SUBSTÂNCIA")
+    // ✅ CORRIGIDO: Encontrar linha dos headers reais (busca mais precisa)
     let headerRowIndex = -1;
     let headers = [];
     
-    for (let i = 0; i < Math.min(jsonData.length, 50); i++) {
+    for (let i = 0; i < Math.min(jsonData.length, 100); i++) {
       const row = jsonData[i];
       if (row && Array.isArray(row)) {
-        // Procurar por "SUBSTÂNCIA" que é o primeiro header real
+        // Procurar pela combinação específica de headers da CMED
         const temSubstancia = row.some(cell => 
-          cell && cell.toString().toUpperCase().includes('SUBSTÂNCIA')
+          cell && cell.toString().trim() === 'SUBSTÂNCIA'
         );
-        if (temSubstancia) {
+        const temCNPJ = row.some(cell => 
+          cell && cell.toString().trim() === 'CNPJ'
+        );
+        const temLaboratorio = row.some(cell => 
+          cell && cell.toString().trim() === 'LABORATÓRIO'
+        );
+        const temPMVG = row.some(cell => 
+          cell && cell.toString().includes('PMVG')
+        );
+        
+        // Deve ter pelo menos 3 destes headers para ser a linha correta
+        const numHeadersEncontrados = [temSubstancia, temCNPJ, temLaboratorio, temPMVG].filter(Boolean).length;
+        
+        if (numHeadersEncontrados >= 3) {
           headerRowIndex = i;
           headers = row;
+          console.log(`🎯 Linha de headers identificada: ${numHeadersEncontrados}/4 indicadores encontrados`);
           break;
         }
       }
@@ -108,37 +122,40 @@ async function syncCMED() {
     // ✅ CORRIGIDO: Busca pelos nomes EXATOS das colunas da CMED
     const indices = {
       codigo: getColumnIndex([
-        'CÓDIGO GGREM', 'codigo ggrem', 'ggrem', 'codigo', 'cod'
+        'CÓDIGO GGREM', 'CODIGO GGREM', 'GGREM'
       ]),
       nome: getColumnIndex([
-        'SUBSTÂNCIA', 'substancia', 'PRODUTO', 'produto', 'medicamento'
+        'SUBSTÂNCIA', 'SUBSTANCIA'
       ]),
       laboratorio: getColumnIndex([
-        'LABORATÓRIO', 'laboratorio', 'laboratory'
+        'LABORATÓRIO', 'LABORATORIO'
       ]),
       apresentacao: getColumnIndex([
-        'APRESENTAÇÃO', 'apresentacao', 'presentation'
+        'APRESENTAÇÃO', 'APRESENTACAO'
+      ]),
+      produto: getColumnIndex([
+        'PRODUTO'
       ]),
       pmvg: getColumnIndex([
-        'PMVG 0 %', 'PMVG 0%', 'pmvg 0%', 'pmvg 0 %', 'PMVG Sem Impostos', 'pmvg'
+        'PMVG 0 %', 'PMVG 0%', 'PMVG Sem Impostos'
       ]),
       pf: getColumnIndex([
-        'PF 0%', 'PF 0 %', 'pf 0%', 'pf 0 %', 'PF Sem Impostos', 'preco fabrica'
+        'PF 0%', 'PF 0 %', 'PF Sem Impostos'
       ]),
       icms_12: getColumnIndex([
-        'PF 12 %', 'PF 12%', 'pf 12%', 'pf 12 %'
+        'PF 12 %', 'PF 12%'
       ]),
       icms_17: getColumnIndex([
-        'PF 17 %', 'PF 17%', 'pf 17%', 'pf 17 %'
+        'PF 17 %', 'PF 17%'
       ]),
       icms_18: getColumnIndex([
-        'PF 18 %', 'PF 18%', 'pf 18%', 'pf 18 %'
+        'PF 18 %', 'PF 18%'
       ]),
       icms_20: getColumnIndex([
-        'PF 20 %', 'PF 20%', 'pf 20%', 'pf 20 %'
+        'PF 20 %', 'PF 20%'
       ]),
       icms_21: getColumnIndex([
-        'PF 21 %', 'PF 21%', 'pf 21%', 'pf 21 %'
+        'PF 21 %', 'PF 21%'
       ])
     };
 
@@ -149,8 +166,21 @@ async function syncCMED() {
       console.log(`  ${status} ${key}: [${value}] "${headerName}"`);
     });
 
+    // Mostrar mais headers relevantes para debug
+    console.log('\n🔍 Todos os headers que contêm palavras-chave:');
+    headers.forEach((h, i) => {
+      if (h && typeof h === 'string') {
+        const upper = h.toUpperCase();
+        if (upper.includes('SUBSTÂNCIA') || upper.includes('PRODUTO') || 
+            upper.includes('PMVG') || upper.includes('PF ') || 
+            upper.includes('LABORATÓRIO') || upper.includes('APRESENTAÇÃO')) {
+          console.log(`  [${i}]: "${h}"`);
+        }
+      }
+    });
+
     // ✅ VERIFICAÇÃO: Pelo menos nome deve existir
-    if (indices.nome === -1) {
+    if (indices.nome === -1 && indices.produto === -1) {
       console.log('❌ Colunas SUBSTÂNCIA/PRODUTO não encontradas. Headers disponíveis:');
       headers.forEach((h, i) => {
         if (h && (h.includes('SUBSTÂNCIA') || h.includes('PRODUTO'))) {
@@ -161,9 +191,9 @@ async function syncCMED() {
     }
 
     if (indices.pmvg === -1 && indices.pf === -1) {
-      console.log('❌ Colunas PMVG e PF não encontradas. Headers disponíveis:');
+      console.log('❌ Colunas PMVG e PF não encontradas. Headers com preços disponíveis:');
       headers.forEach((h, i) => {
-        if (h && (h.includes('PMVG') || h.includes('PF'))) {
+        if (h && (h.includes('PMVG') || h.includes('PF') || h.includes('PREÇO'))) {
           console.log(`   [${i}]: "${h}" ⭐`);
         }
       });
@@ -184,10 +214,19 @@ async function syncCMED() {
       if (!row || row.length === 0) continue;
 
       try {
-        // ✅ CORRIGIDO: Usar nomes de substância + produto se disponível
-        const substancia = indices.nome !== -1 ? (row[indices.nome] || '') : '';
-        const produto = row[8] || ''; // PRODUTO está na coluna 8 baseado no arquivo
-        const nomeCompleto = substancia || produto || 'Nome não informado';
+        // ✅ CORRIGIDO: Usar substância + produto para criar nome completo
+        const substancia = indices.nome !== -1 ? (row[indices.nome] || '').toString().trim() : '';
+        const produto = indices.produto !== -1 ? (row[indices.produto] || '').toString().trim() : '';
+        
+        // Priorizar produto se disponível, senão usar substância
+        let nomeCompleto = '';
+        if (produto && produto !== '' && produto !== 'undefined') {
+          nomeCompleto = produto;
+        } else if (substancia && substancia !== '' && substancia !== 'undefined') {
+          nomeCompleto = substancia;
+        } else {
+          nomeCompleto = 'Nome não informado';
+        }
         
         const medicamento = {
           id: i,
