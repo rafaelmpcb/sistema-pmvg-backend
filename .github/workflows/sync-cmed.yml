@@ -2,9 +2,8 @@ name: 'Sincronizar Base CMED'
 
 on:
   schedule:
-    # Todo dia 28 às 06:00 UTC (mesmo que o backend)
     - cron: '0 6 28 * *'
-  workflow_dispatch: # Permitir execução manual
+  workflow_dispatch:
 
 jobs:
   sync-cmed:
@@ -44,9 +43,3 @@ jobs:
         git add data/
         git commit -m "🔄 Atualização automática base CMED - $(date '+%Y-%m-%d')"
         git push
-        
-    - name: Notificar sucesso
-      if: steps.verify-changed-files.outputs.changed == 'true'
-      run: |
-        echo "✅ Base CMED atualizada com sucesso!"
-        echo "📊 Nova versão disponível para o backend"
