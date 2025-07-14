@@ -2,31 +2,33 @@ name: 'Sincronizar Base CMED'
 
 on:
   schedule:
-    - cron: '0 6 28 * *'  # Executa dia 28 às 6h UTC
-  workflow_dispatch:
+    - cron: '0 6 28 * *'  # Executa dia 28 às 6h UTC (3h da manhã no Brasil, salvo horário de verão)
+  workflow_dispatch:       # Permite execução manual
 
 jobs:
   sync-cmed:
     runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Setup Node.js
+    steps:
+      - name: ✅ Checkout do repositório com permissão de push
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: 🔧 Setup do Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
 
-      - name: Instalar dependências
+      - name: 📦 Instalar dependências
         run: |
           npm install axios xlsx fs-extra
 
-      - name: Executar script de sincronização da CMED
+      - name: 📥 Executar script de sincronização da CMED
         run: |
           node .github/scripts/sync-cmed.js
 
-      - name: Verificar se houve alterações
+      - name: 🔍 Verificar se houve alterações
         id: verify-changed-files
         run: |
           if [ -n "$(git status --porcelain)" ]; then
@@ -35,7 +37,7 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Commit e Push das alterações
+      - name: 🚀 Commit e Push das alterações
         if: steps.verify-changed-files.outputs.changed == 'true'
         run: |
           git config --global user.email "action@github.com"
