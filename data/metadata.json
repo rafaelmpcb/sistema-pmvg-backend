@@ -1,0 +1,21 @@
+{
+  "fonte": "ANVISA/CMED",
+  "url": "https://www.gov.br/anvisa/pt-br/assuntos/medicamentos/cmed/precos/arquivos/xls_conformidade_gov_20250707_104547402.xls/@@download/file",
+  "dataProcessamento": "2025-07-14T18:21:20.063Z",
+  "totalMedicamentos": 26040,
+  "versao": "1.0",
+  "colunas": {
+    "codigo": 3,
+    "nome": 0,
+    "laboratorio": 2,
+    "apresentacao": 9,
+    "produto": 8,
+    "pmvg": 40,
+    "pf": 14,
+    "icms_12": 15,
+    "icms_17": 17,
+    "icms_18": 21,
+    "icms_20": 27,
+    "icms_21": 31
+  }
+}
