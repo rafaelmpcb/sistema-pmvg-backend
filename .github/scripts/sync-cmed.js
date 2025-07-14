@@ -3,7 +3,6 @@ const XLSX = require('xlsx');
 const fs = require('fs-extra');
 const path = require('path');
 
-// URL da ANVISA
 const ANVISA_URL = 'https://www.gov.br/anvisa/pt-br/assuntos/medicamentos/cmed/precos/arquivos/xls_conformidade_gov_20250707_104547402.xls/@@download/file';
 
 async function syncCMED() {
@@ -11,12 +10,11 @@ async function syncCMED() {
     console.log('🔄 Iniciando download da base CMED...');
     console.log('📡 URL:', ANVISA_URL);
 
-    // Download com timeout maior no GitHub (sem limitações do Render)
     const response = await axios({
       method: 'GET',
       url: ANVISA_URL,
       responseType: 'arraybuffer',
-      timeout: 600000, // 10 minutos (GitHub Actions permite)
+      timeout: 600000, // 10 minutos
       headers: {
         'User-Agent': 'Mozilla/5.0 (GitHub-Action CMED-Sync/1.0)',
         'Accept': 'application/vnd.ms-excel,*/*',
@@ -33,7 +31,6 @@ async function syncCMED() {
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     
-    // Converter para JSON
     const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
     
     if (jsonData.length < 2) {
@@ -70,7 +67,6 @@ async function syncCMED() {
 
     console.log('📋 Índices encontrados:', indices);
 
-    // Processar dados e criar estrutura otimizada
     const medicamentos = [];
     let processados = 0;
     let validos = 0;
@@ -115,11 +111,15 @@ async function syncCMED() {
       }
     }
 
+    if (validos === 0) {
+      throw new Error('Nenhum medicamento válido encontrado no arquivo CMED');
+    }
+
     console.log(`✅ Processamento concluído!`);
     console.log(`📊 Total processados: ${processados}`);
     console.log(`💾 Total válidos: ${validos}`);
 
-    // Criar diretório data se não existir
+    // Criar diretório data
     await fs.ensureDir('data');
 
     // Salvar dados processados
@@ -134,36 +134,16 @@ async function syncCMED() {
       medicamentos: medicamentos
     };
 
-    // Salvar como JSON compactado
     await fs.writeJson('data/cmed-pmvg.json', outputData, { spaces: 0 });
-    
-    // Salvar metadata separadamente para consulta rápida
     await fs.writeJson('data/metadata.json', outputData.metadata, { spaces: 2 });
-
-    // Criar versão CSV para backup
-    const csvHeaders = ['id', 'codigo', 'nome', 'laboratorio', 'apresentacao', 'pmvg', 'preco_fabrica'];
-    const csvData = [csvHeaders.join(',')];
-    
-    medicamentos.forEach(med => {
-      const row = csvHeaders.map(field => {
-        const value = med[field] || '';
-        return typeof value === 'string' && value.includes(',') 
-          ? `"${value.replace(/"/g, '""')}"` 
-          : value;
-      });
-      csvData.push(row.join(','));
-    });
-    
-    await fs.writeFile('data/cmed-pmvg.csv', csvData.join('\n'), 'utf8');
 
     const finalSize = (JSON.stringify(outputData).length / 1024 / 1024).toFixed(2);
     
     console.log(`📁 Arquivos salvos:`);
     console.log(`  - data/cmed-pmvg.json (${finalSize} MB)`);
     console.log(`  - data/metadata.json`);
-    console.log(`  - data/cmed-pmvg.csv`);
     
-    console.log('🎉 Sincronização concluída com sucesso!');
+    console.log('🎉 Sincronização CMED concluída com sucesso!');
 
   } catch (error) {
     console.error('❌ Erro na sincronização:', error.message);
@@ -172,5 +152,4 @@ async function syncCMED() {
   }
 }
 
-// Executar sincronização
 syncCMED();
