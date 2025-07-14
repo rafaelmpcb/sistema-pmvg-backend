@@ -13,8 +13,8 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || 'sistema_pmvg_secret_key_2025';
 
-// ✅ NOVO: URL real da ANVISA testada e funcionando
-const ANVISA_URL = 'https://www.gov.br/anvisa/pt-br/assuntos/medicamentos/cmed/precos/arquivos/xls_conformidade_gov_20250707_104547402.xls/@@download/file';
+// ✅ MODIFICADO: URL do GitHub para carregar dados processados
+const GITHUB_CMED_URL = 'https://raw.githubusercontent.com/rafaelmpcb/sistema-pmvg-backend/main/data/cmed-pmvg.json';
 
 // Middlewares
 app.use(cors({
@@ -123,66 +123,39 @@ db.serialize(() => {
   `, [adminPassword, userPassword]);
 });
 
-// ✅ NOVO: Função para sincronizar dados reais da ANVISA
-const syncPMVGData = async () => {
+// ✅ NOVO: Função para carregar dados CMED do GitHub (processados pelo GitHub Actions)
+const loadPMVGFromGitHub = async () => {
   try {
-    console.log('🔄 Iniciando sincronização com ANVISA...');
-    console.log('📥 Baixando XLS da ANVISA...');
+    console.log('🔄 Carregando base CMED do GitHub...');
+    console.log('📡 URL:', GITHUB_CMED_URL);
 
-    // Download do arquivo XLS
+    // Download rápido do GitHub (muito mais confiável que ANVISA direta)
     const response = await axios({
       method: 'GET',
-      url: ANVISA_URL,
-      responseType: 'arraybuffer',
-      timeout: 300000, // 5 minutos
+      url: GITHUB_CMED_URL,
+      timeout: 30000, // 30 segundos é suficiente para GitHub
       headers: {
-        'User-Agent': 'Sistema-PMVG/1.0'
+        'User-Agent': 'Sistema-PMVG/1.0',
+        'Accept': 'application/json'
       }
     });
 
-    console.log('✅ Download concluído, processando XLS...');
+    console.log('✅ Dados carregados do GitHub!');
 
-    // Processar arquivo XLS
-    const workbook = XLSX.read(response.data, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
+    const data = response.data;
     
-    // Converter para JSON
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-    
-    if (jsonData.length < 2) {
-      throw new Error('Arquivo XLS vazio ou inválido');
+    // Validações
+    if (!data.medicamentos || !Array.isArray(data.medicamentos)) {
+      throw new Error('Formato de dados inválido - medicamentos não é array');
     }
 
-    console.log(`📊 Processando ${jsonData.length} linhas...`);
+    if (data.medicamentos.length === 0) {
+      throw new Error('Base CMED vazia - sem medicamentos válidos');
+    }
 
-    // Encontrar índices das colunas (primeira linha = cabeçalho)
-    const headers = jsonData[0];
-    const getColumnIndex = (variations) => {
-      for (const variation of variations) {
-        const index = headers.findIndex(h => 
-          h && h.toString().toLowerCase().includes(variation.toLowerCase())
-        );
-        if (index !== -1) return index;
-      }
-      return -1;
-    };
-
-    const indices = {
-      codigo: getColumnIndex(['codigo', 'cod', 'ean']),
-      nome: getColumnIndex(['medicamento', 'produto', 'nome']),
-      laboratorio: getColumnIndex(['laboratorio', 'empresa', 'fabricante']),
-      apresentacao: getColumnIndex(['apresentacao', 'apresent']),
-      pmvg: getColumnIndex(['pmvg', 'preco maximo', 'governo']),
-      pf: getColumnIndex(['pf 0%', 'preco fabrica', 'pf']),
-      icms_12: getColumnIndex(['pf 12%', 'icms 12']),
-      icms_17: getColumnIndex(['pf 17%', 'icms 17']),
-      icms_18: getColumnIndex(['pf 18%', 'icms 18']),
-      icms_20: getColumnIndex(['pf 20%', 'icms 20']),
-      icms_21: getColumnIndex(['pf 21%', 'icms 21'])
-    };
-
-    console.log('📋 Índices das colunas encontrados:', indices);
+    console.log(`📊 Total de medicamentos: ${data.medicamentos.length}`);
+    console.log(`📅 Última atualização: ${data.metadata?.dataProcessamento || 'N/A'}`);
+    console.log(`🏛️ Fonte: ${data.metadata?.fonte || 'GitHub Actions + ANVISA'}`);
 
     // Limpar tabela existente
     await new Promise((resolve, reject) => {
@@ -192,87 +165,57 @@ const syncPMVGData = async () => {
       });
     });
 
-    let processados = 0;
     let inseridos = 0;
+    const batchSize = 100;
+    const medicamentos = data.medicamentos;
 
-    // Processar dados (pular cabeçalho)
-    for (let i = 1; i < jsonData.length; i++) {
-      const row = jsonData[i];
+    // Inserir medicamentos em lotes para performance
+    for (let i = 0; i < medicamentos.length; i += batchSize) {
+      const batch = medicamentos.slice(i, i + batchSize);
       
-      if (!row || row.length === 0) continue;
+      const stmt = db.prepare(`INSERT OR REPLACE INTO medicamentos 
+        (codigo, nome, laboratorio, apresentacao, categoria, pmvg, preco_fabrica, icms_0, icms_12, icms_17, icms_18, icms_20, icms_21) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
-      try {
-        const medicamento = {
-          codigo: row[indices.codigo] || `AUTO_${i}`,
-          nome: row[indices.nome] || 'Nome não informado',
-          laboratorio: row[indices.laboratorio] || 'Laboratório não informado',
-          apresentacao: row[indices.apresentacao] || 'Apresentação não informada',
-          pmvg: parseFloat(row[indices.pmvg]) || 0,
-          preco_fabrica: parseFloat(row[indices.pf]) || 0,
-          icms_0: parseFloat(row[indices.pf]) || 0,
-          icms_12: parseFloat(row[indices.icms_12]) || 0,
-          icms_17: parseFloat(row[indices.icms_17]) || 0,
-          icms_18: parseFloat(row[indices.icms_18]) || 0,
-          icms_20: parseFloat(row[indices.icms_20]) || 0,
-          icms_21: parseFloat(row[indices.icms_21]) || 0
-        };
+      for (const med of batch) {
+        stmt.run([
+          med.codigo,
+          med.nome,
+          med.laboratorio,
+          med.apresentacao,
+          'Medicamento',
+          med.pmvg,
+          med.preco_fabrica,
+          med.icms_0,
+          med.icms_12,
+          med.icms_17,
+          med.icms_18,
+          med.icms_20,
+          med.icms_21
+        ]);
+        inseridos++;
+      }
 
-        // Validações básicas
-        if (!medicamento.nome || medicamento.nome.length < 3) continue;
-        if (medicamento.pmvg <= 0) continue;
+      stmt.finalize();
 
-        // Inserir no banco
-        await new Promise((resolve, reject) => {
-          db.run(`INSERT OR REPLACE INTO medicamentos 
-            (codigo, nome, laboratorio, apresentacao, categoria, pmvg, preco_fabrica, icms_0, icms_12, icms_17, icms_18, icms_20, icms_21) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              medicamento.codigo,
-              medicamento.nome,
-              medicamento.laboratorio,
-              medicamento.apresentacao,
-              'Medicamento', // categoria padrão
-              medicamento.pmvg,
-              medicamento.preco_fabrica,
-              medicamento.icms_0,
-              medicamento.icms_12,
-              medicamento.icms_17,
-              medicamento.icms_18,
-              medicamento.icms_20,
-              medicamento.icms_21
-            ],
-            function(err) {
-              if (err) reject(err);
-              else {
-                inseridos++;
-                resolve();
-              }
-            }
-          );
-        });
-
-        processados++;
-
-        // Log de progresso
-        if (processados % 1000 === 0) {
-          console.log(`📊 Processados: ${processados} | Inseridos: ${inseridos}`);
-        }
-
-      } catch (error) {
-        console.log(`⚠️ Erro na linha ${i}:`, error.message);
+      // Log de progresso
+      if (i % 1000 === 0) {
+        console.log(`📊 Inseridos: ${inseridos}/${medicamentos.length}`);
       }
     }
 
-    console.log(`✅ Sincronização concluída!`);
-    console.log(`📊 Total processados: ${processados}`);
+    console.log(`✅ Base CMED carregada com sucesso!`);
     console.log(`💾 Total inseridos: ${inseridos}`);
-    console.log(`🗄️ Base PMVG atualizada com dados reais da ANVISA!`);
+    console.log(`🗄️ Fonte: GitHub Actions + ANVISA (dados reais)`);
 
-    return { success: true, processados, inseridos };
+    return { success: true, inseridos, fonte: 'GitHub-ANVISA', totalMedicamentos: inseridos };
 
   } catch (error) {
-    console.error('❌ Erro na sincronização:', error.message);
-    throw error;
+    console.error('❌ Erro ao carregar base CMED do GitHub:', error.message);
+    console.error('⚠️ Sistema funcionará SEM dados da CMED até próxima sincronização');
+    
+    // ✅ NÃO carregar dados demo - apenas lançar erro
+    throw new Error(`Falha ao carregar base CMED: ${error.message}`);
   }
 };
 
@@ -301,7 +244,7 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: new Date().toISOString(),
-    message: 'Sistema PMVG Backend - Conectado com dados reais da ANVISA!'
+    message: 'Sistema PMVG Backend - Conectado com dados reais da ANVISA via GitHub Actions!'
   });
 });
 
@@ -342,7 +285,7 @@ app.get('/api/system/status', authenticateToken, (req, res) => {
     status: 'online',
     version: '1.0.0',
     database: 'connected',
-    anvisa_integration: 'active',
+    anvisa_integration: 'active_via_github_actions',
     last_sync: new Date().toISOString()
   });
 });
@@ -357,7 +300,7 @@ app.get('/api/pmvg/status', authenticateToken, (req, res) => {
     res.json({
       totalMedicamentos: result.total,
       lastUpdate: new Date().toISOString(),
-      fonte: 'ANVISA/CMED',
+      fonte: 'GitHub Actions + ANVISA/CMED',
       status: result.total > 0 ? 'sincronizada' : 'aguardando_sincronizacao'
     });
   });
@@ -554,37 +497,41 @@ app.put('/api/alertas/:id/resolver', authenticateToken, (req, res) => {
   });
 });
 
-// Forçar sincronização manual
+// ✅ MODIFICADO: Forçar sincronização manual (agora do GitHub)
 app.post('/api/pmvg/sync', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Apenas administradores podem forçar sincronização' });
     }
 
-    const result = await syncPMVGData();
+    const result = await loadPMVGFromGitHub();
     res.json({
       message: 'Sincronização concluída com sucesso',
+      fonte: 'GitHub Actions + ANVISA',
+      metodo: 'Carregamento otimizado do GitHub',
       ...result
     });
   } catch (error) {
     console.error('Erro na sincronização manual:', error);
     res.status(500).json({ 
       error: 'Erro na sincronização',
-      details: error.message
+      details: error.message,
+      solucao: 'Execute o GitHub Action manualmente ou aguarde a sincronização automática'
     });
   }
 });
 
 // ============= CRON JOB =============
 
-// Sincronização automática todo dia 28 às 06:00h
-cron.schedule('0 6 28 * *', async () => {
-  console.log('🕕 Executando sincronização automática da ANVISA...');
+// ✅ MODIFICADO: Cron para recarregar do GitHub (mais frequente que a sincronização ANVISA)
+cron.schedule('0 7 28 * *', async () => {
+  console.log('🕖 Executando recarga automática da base CMED do GitHub...');
   try {
-    await syncPMVGData();
-    console.log('✅ Sincronização automática concluída com sucesso!');
+    await loadPMVGFromGitHub();
+    console.log('✅ Recarga automática concluída com sucesso!');
   } catch (error) {
-    console.error('❌ Erro na sincronização automática:', error.message);
+    console.error('❌ Erro na recarga automática:', error.message);
+    console.log('⚠️ Mantendo base atual até próxima tentativa');
   }
 });
 
@@ -594,19 +541,38 @@ app.listen(PORT, async () => {
   console.log('🚀 Sistema PMVG Backend iniciado!');
   console.log(`🌐 Servidor rodando na porta ${PORT}`);
   console.log(`📊 Base de dados: ${dbPath}`);
-  console.log('🔄 Cron job ativo: Sincronização todo dia 28 às 06:00h');
+  console.log('🔄 Cron job ativo: Recarga base CMED todo dia 28 às 07:00h');
+  console.log('🗂️ Fonte de dados: GitHub Actions + ANVISA (processamento otimizado)');
   console.log('✅ Pronto para receber requisições!');
 
-  // Verificar se precisa fazer primeira sincronização
+  // ✅ MODIFICADO: Verificar e carregar base do GitHub
   setTimeout(async () => {
     db.get('SELECT COUNT(*) as total FROM medicamentos', async (err, result) => {
-      if (!err && result.total === 0) {
-        console.log('🚀 Primeira execução: iniciando sincronização inicial...');
-        try {
-          await syncPMVGData();
-          console.log('🎉 Primeira sincronização concluída! Sistema pronto para uso.');
-        } catch (error) {
-          console.log('❌ Erro na sincronização inicial:', error.message);
+      if (!err) {
+        if (result.total === 0) {
+          console.log('🚀 Primeira execução: carregando base CMED do GitHub...');
+          try {
+            await loadPMVGFromGitHub();
+            console.log('🎉 Base CMED carregada com sucesso! Sistema pronto para uso.');
+          } catch (error) {
+            console.log('❌ Erro ao carregar base inicial:', error.message);
+            console.log('⚠️ SISTEMA FUNCIONARÁ SEM DADOS CMED');
+            console.log('🔧 Soluções:');
+            console.log('   1. Execute GitHub Action manualmente');
+            console.log('   2. Aguarde próxima sincronização automática');
+            console.log('   3. Verifique se arquivo data/cmed-pmvg.json existe no GitHub');
+          }
+        } else {
+          console.log(`✅ Base já carregada com ${result.total} medicamentos`);
+          
+          // Tentar atualizar em background se disponível
+          try {
+            await loadPMVGFromGitHub();
+            console.log('🔄 Base atualizada em background com dados mais recentes');
+          } catch (error) {
+            console.log('⚠️ Falha na atualização background - mantendo base atual');
+            console.log(`📊 Continuando com ${result.total} medicamentos em cache`);
+          }
         }
       }
     });
