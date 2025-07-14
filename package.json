@@ -1,42 +1,30 @@
 {
   "name": "sistema-pmvg-backend",
   "version": "1.0.0",
-  "description": "Backend do Sistema PMVG com integração real ANVISA/CMED",
+  "description": "Backend Sistema PMVG com dados reais ANVISA",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
-    "sync": "node -e \"require('./server.js')\""
+    "dev": "nodemon server.js"
   },
-  "keywords": [
-    "pmvg",
-    "anvisa",
-    "medicamentos",
-    "licitacao",
-    "backend"
-  ],
-  "author": "Sistema PMVG",
-  "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "node-cron": "^3.0.3",
-    "axios": "^1.6.2",
-    "csv-parser": "^3.0.0",
-    "csv-writer": "^1.6.0",
-    "jsonwebtoken": "^9.0.2",
-    "bcryptjs": "^2.4.3",
     "sqlite3": "^5.1.6",
-    "dotenv": "^16.3.1"
+    "axios": "^1.6.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "csv-parser": "^3.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/rafaelmpcb/sistema-pmvg-backend.git"
-  }
+  "keywords": ["pmvg", "anvisa", "cmed", "licitacoes"],
+  "author": "Sistema PMVG",
+  "license": "MIT"
 }
