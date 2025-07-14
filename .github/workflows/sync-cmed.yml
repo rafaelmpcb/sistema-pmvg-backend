@@ -2,7 +2,7 @@ name: 'Sincronizar Base CMED'
 
 on:
   schedule:
-    - cron: '0 6 28 * *'
+    - cron: '0 6 28 * *'  # Executa dia 28 às 6h UTC
   workflow_dispatch:
 
 jobs:
@@ -10,36 +10,36 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        
-    - name: Install dependencies
-      run: |
-        npm install axios xlsx fs-extra
-        
-    - name: Baixar e Processar CMED
-      run: |
-        node .github/scripts/sync-cmed.js
-        
-    - name: Verificar se houve mudanças
-      id: verify-changed-files
-      run: |
-        if [ -n "$(git status --porcelain)" ]; then
-          echo "changed=true" >> $GITHUB_OUTPUT
-        else
-          echo "changed=false" >> $GITHUB_OUTPUT
-        fi
-        
-    - name: Commit e Push
-      if: steps.verify-changed-files.outputs.changed == 'true'
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add data/
-        git commit -m "🔄 Atualização automática base CMED - $(date '+%Y-%m-%d')"
-        git push
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Instalar dependências
+        run: |
+          npm install axios xlsx fs-extra
+
+      - name: Executar script de sincronização da CMED
+        run: |
+          node .github/scripts/sync-cmed.js
+
+      - name: Verificar se houve alterações
+        id: verify-changed-files
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit e Push das alterações
+        if: steps.verify-changed-files.outputs.changed == 'true'
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git add data/
+          git commit -m "🔄 Atualização automática base CMED - $(date '+%Y-%m-%d')"
+          git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/rafaelmpcb/sistema-pmvg-backend.git HEAD:main
